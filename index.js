@@ -26,7 +26,7 @@ function buildCard(data) {
   const responseSizeLabel = { short: 'Коротко', medium: 'Обычно', long: 'Подробно' };
 
   let endFormatted = '';
-  if (data.subscriptionEnd && plan !== 'free') {
+  if (data.subscriptionEnd && data.subscriptionEnd !== '' && data.subscriptionEnd !== 'null' && data.subscriptionEnd !== 'undefined' && plan !== 'free') {
     const d = new Date(data.subscriptionEnd);
     endFormatted = ` · до ${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
   }
