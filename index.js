@@ -2,22 +2,6 @@ const http = require('http');
 const sharp = require('sharp');
 const PORT = process.env.PORT || 3000;
 
-const PLAN_COLORS = {
-  free:  '#6c757d',
-  start: '#28a745',
-  lite:  '#17a2b8',
-  pro:   '#fd7e14',
-  max:   '#6f42c1'
-};
-
-const PLAN_NAMES = {
-  free:  'Free',
-  start: 'Start',
-  lite:  'Lite',
-  pro:   'Pro',
-  max:   'Max'
-};
-
 function escapeXml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -27,88 +11,91 @@ function escapeXml(str) {
 }
 
 function buildCard(data) {
-  const W = 600, H = 420;
+  const W = 1024;
   const plan = data.plan || 'free';
-  const accent = PLAN_COLORS[plan] || '#6c757d';
-  const planName = PLAN_NAMES[plan] || plan;
   const limits = data.limits || { daily_text: 5, daily_photo: 0, monthly_text: 150, monthly_photo: 0 };
+  const dailyText = data.dailyTextRequests || 0;
+  const monthlyText = data.monthlyTextRequests || 0;
+  const dailyPhoto = data.dailyPhotoRequests || 0;
+  const monthlyPhoto = data.monthlyPhotoRequests || 0;
+  const extraText = data.extraText || 0;
+  const extraPhoto = data.extraPhoto || 0;
+  const responseSize = data.responseSize || 'short';
 
-  let dateStr = '';
+  const planLabel = { free: 'Free', start: 'Start', lite: 'Lite', pro: 'Pro', max: 'Max' };
+  const responseSizeLabel = { short: 'Коротко', medium: 'Обычно', long: 'Подробно' };
+
+  let endFormatted = '';
   if (data.subscriptionEnd && plan !== 'free') {
     const d = new Date(data.subscriptionEnd);
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    dateStr = `do ${dd}.${mm}.${d.getFullYear()}`;
+    endFormatted = ` · до ${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
   }
 
-  const sizeMap = { short: 'Korotko', medium: 'Obychno', long: 'Podrobno' };
-  const sizeName = sizeMap[data.responseSize] || 'Korotko';
+  const textDayBar = limits.daily_text > 0 ? Math.min((dailyText / limits.daily_text) * 660, 660) : 0;
+  const photoDayBar = limits.daily_photo > 0 ? Math.min((dailyPhoto / limits.daily_photo) * 660, 660) : 0;
 
-  const stats = [];
+  const photoLine = limits.daily_photo > 0
+    ? `${dailyPhoto}/${limits.daily_photo} за день   ${monthlyPhoto}/${limits.monthly_photo} за месяц`
+    : (extraPhoto > 0 ? `доп. генераций: ${extraPhoto}` : 'не входит в тариф');
+  const photoOpacity = limits.daily_photo > 0 ? '1' : '0.45';
 
-  const dayTextRatio = limits.daily_text > 0 ? Math.min((data.dailyTextRequests || 0) / limits.daily_text, 1) : 0;
-  stats.push({ label: 'Soobshhenij segodnja', used: data.dailyTextRequests || 0, total: limits.daily_text, ratio: dayTextRatio, type: 'bar' });
+  const hasExtra = extraText > 0 || extraPhoto > 0;
+  const svgH = hasExtra ? 540 : 430;
+  const lineY = hasExtra ? 406 : 296;
+  const modeY = hasExtra ? 434 : 320;
+  const badgeY = svgH - 55;
 
-  const monTextRatio = limits.monthly_text > 0 ? Math.min((data.monthlyTextRequests || 0) / limits.monthly_text, 1) : 0;
-  stats.push({ label: 'Soobshhenij v mesjace', used: data.monthlyTextRequests || 0, total: limits.monthly_text, ratio: monTextRatio, type: 'bar' });
-
-  if (limits.daily_photo > 0) {
-    const photoRatio = Math.min((data.dailyPhotoRequests || 0) / limits.daily_photo, 1);
-    stats.push({ label: 'Izobrazhenij segodnja', used: data.dailyPhotoRequests || 0, total: limits.daily_photo, ratio: photoRatio, type: 'bar' });
-  } else {
-    const ep = data.extraPhoto || 0;
-    stats.push({ label: 'Generacija izobrazhenij', text: ep > 0 ? `Ne v tarife, dop: ${ep} sht.` : 'Ne vkhodit v tarif', type: 'text' });
+  let extraBlock = '';
+  if (extraText > 0) {
+    const w = extraPhoto > 0 ? 395 : 830;
+    extraBlock += `<rect x="80" y="306" width="${w}" height="74" rx="12" fill="#0F255E" fill-opacity="0.55"/>
+    <text x="118" y="337" font-family="Arial, sans-serif" font-size="22" fill="#B6BFEA">Доп. текстовые запросы</text>
+    <text x="118" y="368" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#ffffff">${extraText}</text>`;
+  }
+  if (extraPhoto > 0) {
+    const x = extraText > 0 ? 509 : 80;
+    const w = extraText > 0 ? 435 : 830;
+    extraBlock += `<rect x="${x}" y="306" width="${w}" height="74" rx="12" fill="#0F255E" fill-opacity="0.55"/>
+    <text x="${x+38}" y="337" font-family="Arial, sans-serif" font-size="22" fill="#B6BFEA">Доп. генерации изображений</text>
+    <text x="${x+38}" y="368" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#ffffff">${extraPhoto}</text>`;
   }
 
-  if ((data.extraText || 0) > 0) {
-    stats.push({ label: 'Dop. soobshhenij', text: `${data.extraText} sht.`, type: 'text' });
-  }
+  return `<svg viewBox="0 0 ${W} ${svgH}" width="${W}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="${W}" y2="${svgH}" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#070A18"/><stop offset="1" stop-color="#0B1A48"/>
+</linearGradient>
+</defs>
+<rect width="${W}" height="${svgH}" fill="url(#bg)"/>
+<path d="M-80 ${svgH*0.75} C200 ${svgH*0.6} 420 ${svgH*0.9} 720 ${svgH*0.75} S1240 ${svgH*0.6} 1120 ${svgH*0.75}" stroke="#18D7FF" stroke-opacity="0.07" stroke-width="10" fill="none"/>
 
-  const startY = 130;
-  const rowH = 56;
-  let statsSvg = '';
+<text x="512" y="56" text-anchor="middle" font-family="Arial, sans-serif" font-size="36" font-weight="bold" fill="#ffffff">${escapeXml(planLabel[plan] || plan)}${escapeXml(endFormatted)}</text>
+<line x1="80" y1="74" x2="944" y2="74" stroke="#B55CFF" stroke-opacity="0.2" stroke-width="1"/>
 
-  stats.forEach((item, i) => {
-    const y = startY + i * rowH;
-    const bgRect = i % 2 === 0 ? `<rect x="0" y="${y}" width="${W}" height="${rowH - 4}" fill="white" fill-opacity="0.03"/>` : '';
-    const labelEl = `<text x="30" y="${y + 18}" fill="#ced4da" font-size="14" font-family="Arial, sans-serif">${escapeXml(item.label)}</text>`;
+<rect x="80" y="96" width="830" height="82" rx="12" fill="#0F255E" fill-opacity="0.55"/>
+<circle cx="118" cy="137" r="14" fill="#18D7FF" fill-opacity="0.16"/>
+<circle cx="118" cy="137" r="8" fill="#18D7FF"/>
+<text x="144" y="128" font-family="Arial, sans-serif" font-size="22" fill="#B6BFEA">Текстовые запросы</text>
+<text x="144" y="158" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#ffffff">${dailyText}/${limits.daily_text} за день   ${monthlyText}/${limits.monthly_text} за месяц</text>
+<rect x="144" y="166" width="660" height="5" rx="2" fill="#ffffff" fill-opacity="0.08"/>
+<rect x="144" y="166" width="${textDayBar}" height="5" rx="2" fill="#18D7FF" fill-opacity="0.75"/>
 
-    if (item.type === 'bar') {
-      const barY = y + 26;
-      const barW = 540;
-      const barH2 = 14;
-      const fillW = Math.round(barW * item.ratio);
-      const barColor = item.ratio > 0.85 ? '#e74c3c' : item.ratio > 0.6 ? '#f39c12' : accent;
-      const counter = `${item.used} / ${item.total}`;
-      statsSvg += bgRect + labelEl + `
-        <rect x="30" y="${barY}" width="${barW}" height="${barH2}" rx="7" fill="#2d3748"/>
-        ${fillW > 0 ? `<rect x="30" y="${barY}" width="${fillW}" height="${barH2}" rx="7" fill="${barColor}"/>` : ''}
-        <text x="${30 + barW}" y="${y + 18}" fill="white" font-size="12" font-family="Arial, sans-serif" text-anchor="end" font-weight="bold">${escapeXml(counter)}</text>
-      `;
-    } else {
-      statsSvg += bgRect + labelEl + `<text x="30" y="${y + 38}" fill="#868e96" font-size="13" font-family="Arial, sans-serif">${escapeXml(item.text)}</text>`;
-    }
-  });
+<rect x="80" y="192" width="830" height="82" rx="12" fill="#0F255E" fill-opacity="0.55"/>
+<circle cx="118" cy="233" r="14" fill="#B55CFF" fill-opacity="0.16"/>
+<circle cx="118" cy="233" r="8" fill="#B55CFF"/>
+<text x="144" y="224" font-family="Arial, sans-serif" font-size="22" fill="#B6BFEA">Генерация изображений</text>
+<text x="144" y="254" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#ffffff" opacity="${photoOpacity}">${escapeXml(photoLine)}</text>
+<rect x="144" y="262" width="660" height="5" rx="2" fill="#ffffff" fill-opacity="0.08"/>
+<rect x="144" y="262" width="${photoDayBar}" height="5" rx="2" fill="#B55CFF" fill-opacity="0.75"/>
 
-  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#16213e"/>
-        <stop offset="100%" stop-color="#0f3460"/>
-      </linearGradient>
-    </defs>
-    <rect width="${W}" height="${H}" fill="url(#bg)"/>
-    <rect x="0" y="0" width="${W}" height="6" fill="${accent}"/>
-    <circle cx="${W - 60}" cy="60" r="80" fill="${accent}" fill-opacity="0.08"/>
-    <text x="30" y="48" fill="white" font-size="20" font-weight="bold" font-family="Arial, sans-serif">AI Link | ChatGPT | Nejroset</text>
-    <rect x="30" y="62" width="160" height="34" rx="8" fill="${accent}"/>
-    <text x="44" y="85" fill="white" font-size="16" font-weight="bold" font-family="Arial, sans-serif">Tarif: ${escapeXml(planName)}</text>
-    ${dateStr ? `<text x="200" y="85" fill="#adb5bd" font-size="13" font-family="Arial, sans-serif">${escapeXml(dateStr)}</text>` : ''}
-    <line x1="30" y1="110" x2="570" y2="110" stroke="${accent}" stroke-opacity="0.4" stroke-width="1"/>
-    ${statsSvg}
-    <text x="30" y="${H - 16}" fill="#adb5bd" font-size="13" font-family="Arial, sans-serif">Rezhim otveta: ${escapeXml(sizeName)}</text>
-    <text x="${W - 20}" y="${H - 16}" fill="${accent}" fill-opacity="0.7" font-size="12" font-weight="bold" font-family="Arial, sans-serif" text-anchor="end">vk.com/ailink_bot</text>
-  </svg>`;
+${extraBlock}
+
+<line x1="80" y1="${lineY}" x2="944" y2="${lineY}" stroke="#B55CFF" stroke-opacity="0.2" stroke-width="1"/>
+<text x="512" y="${modeY}" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#B6BFEA">Режим ответа: <tspan fill="#ffffff">${escapeXml(responseSizeLabel[responseSize] || 'Коротко')}</tspan></text>
+
+<rect x="312" y="${badgeY}" width="400" height="38" rx="19" fill="#0F255E"/>
+<text x="512" y="${badgeY + 25}" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="#B6BFEA">FREE AI · @freee_ai_bot</text>
+</svg>`;
 }
 
 const server = http.createServer((req, res) => {
