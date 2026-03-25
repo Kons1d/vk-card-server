@@ -70,7 +70,7 @@ function buildCard(data) {
   const extraPhoto     = Number(data.extraPhoto)          || 0;
   const responseSize   = data.responseSize || 'short';
   const status         = data.status || 'Онлайн';
-  const botName        = data.botName || 'FREE AI · @freee_ai_bot';
+  const botName        = data.botName || 'AI LINK · @ailinkchatbot';
 
   const planLabel    = PLAN_LABEL[plan]    || plan;
   const subtitle     = PLAN_SUBTITLES[plan]|| '';
